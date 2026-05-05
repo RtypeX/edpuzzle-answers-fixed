@@ -68,6 +68,18 @@ if cache:
     else:
       del current_tokens[email]
 
+def is_configured_credential(creds):
+  username = creds.get("username", "").strip()
+  password = creds.get("password", "").strip()
+  if not username or not password:
+    return False
+  if username == "EDPUZZLE_EMAIL" or password == "EDPUZZLE_PASSWORD":
+    return False
+  return True
+
+def get_configured_teacher_creds():
+  return [creds for creds in config["teacher_creds"] if is_configured_credential(creds)]
+
 def write_cache():
   global cache
   cache = {
@@ -145,11 +157,34 @@ def account_login(creds):
   now = int(time.time())
   current_tokens[username] = login_res.cookies.get("token"), now
   write_cache()
+  return current_tokens[username][0]
+
+def ensure_teacher_token():
+  if current_tokens:
+    return random.choice(list(current_tokens.values()))
+
+  teacher_creds = get_configured_teacher_creds()
+  if not teacher_creds:
+    raise exceptions.ServiceUnavailableException(
+      "No configured teacher credentials are available. Update server/config/config.json "
+      "with a valid teacher account before using /api/media."
+    )
+
+  for creds in teacher_creds:
+    token = account_login(creds)
+    if token:
+      return current_tokens[creds["username"]]
+
+  raise exceptions.ServiceUnavailableException(
+    "Failed to authenticate any configured teacher account. Check the credentials in "
+    "server/config/config.json and review the server logs for the login failure."
+  )
 
 def token_refresher():
   write_cache()
   while True:
-    for creds in config["teacher_creds"]:
+    teacher_creds = get_configured_teacher_creds()
+    for creds in teacher_creds:
       account_login(creds)
       time.sleep(30) #30s between login attempts
     time.sleep(60*10) # 10 min
@@ -223,7 +258,7 @@ def media_proxy(media_id):
   try:
     session = create_session()
 
-    current_token = random.choice(list(current_tokens.values()))
+    current_token = ensure_teacher_token()
     session.cookies.update({
       "token": current_token[0]
     })
