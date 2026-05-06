@@ -606,6 +606,11 @@ async function init() {
     console.error(error + "");
     console.error(error.stack);
     status_text.innerText = `An error has occurred. Please check the JS console for more details.\n\n${error+""}`;
+    // If the assignment loaded OK but media fetch failed (e.g. auto-answer disabled),
+    // still allow the video skipper to be used.
+    if (assignment_mode) {
+      skipper_button.disabled = false;
+    }
   }
 }
 
