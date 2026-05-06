@@ -4,3 +4,5 @@ Flask-Limiter
 Flask-Cors
 curl_cffi
 google-genai
+pytest
+pytest-mock
