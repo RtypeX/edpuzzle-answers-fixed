@@ -30,6 +30,7 @@ if cache_path.exists():
 #read config
 utils.include_traceback = config["include_traceback"]
 ai.config = config
+enable_auto_answer = config.get("enable_auto_answer", True)
 
 # handle compression and rate limits
 print("Preparing flask instance...")
@@ -221,6 +222,11 @@ def generate():
 @limiter.limit(config["rate_limit"]["media"])
 def media_proxy(media_id):
   try:
+    if not enable_auto_answer:
+      raise exceptions.ServiceUnavailableException(
+        "The auto-answer feature is currently disabled on this server."
+      )
+
     session = create_session()
 
     current_token = random.choice(list(current_tokens.values()))
@@ -262,8 +268,11 @@ def discord():
 # run the server
 if __name__ == "__main__":
   if not is_running_from_reloader():
-    t = threading.Thread(target=token_refresher, daemon=True)
-    t.start()
+    if enable_auto_answer:
+      t = threading.Thread(target=token_refresher, daemon=True)
+      t.start()
+    else:
+      print("Auto-answer disabled; skipping token refresher.")
 
   print("Starting flask...")
   app.run(

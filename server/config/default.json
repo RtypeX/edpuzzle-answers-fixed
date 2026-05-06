@@ -1,4 +1,5 @@
 {
+  "enable_auto_answer": true,
   "dev_mode": false,
   "include_traceback": false,
   "behind_proxy": true,
