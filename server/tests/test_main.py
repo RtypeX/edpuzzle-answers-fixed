@@ -235,7 +235,7 @@ class TestDiscordRoute:
     def test_redirect_points_to_discord(self, client):
         resp = client.get("/discord")
         location = resp.headers.get("Location", "")
-        assert "discord.com" in location
+        assert location.startswith("https://discord.com/")
 
 
 # ---------------------------------------------------------------------------
@@ -315,3 +315,86 @@ class TestGetConfiguredTeacherCreds:
         finally:
             m.config["teacher_creds"] = original
         assert result == []
+
+
+# ---------------------------------------------------------------------------
+# ensure_teacher_token – unit tests
+# ---------------------------------------------------------------------------
+
+class TestEnsureTeacherToken:
+    def _with_tokens(self, m, tokens_dict):
+        """Context manager that temporarily replaces current_tokens."""
+        import contextlib
+
+        @contextlib.contextmanager
+        def _ctx():
+            original = dict(m.current_tokens)
+            m.current_tokens.clear()
+            m.current_tokens.update(tokens_dict)
+            try:
+                yield
+            finally:
+                m.current_tokens.clear()
+                m.current_tokens.update(original)
+
+        return _ctx()
+
+    def test_returns_a_token_when_one_is_cached(self):
+        import main as m
+        entry = ("mytoken", int(__import__("time").time()))
+        with self._with_tokens(m, {"user@example.com": entry}):
+            result = m.ensure_teacher_token()
+        assert result == entry
+
+    def test_returns_one_of_many_cached_tokens(self):
+        import main as m
+        entries = {
+            "a@example.com": ("tok_a", 1),
+            "b@example.com": ("tok_b", 2),
+        }
+        with self._with_tokens(m, entries):
+            result = m.ensure_teacher_token()
+        assert result in entries.values()
+
+    def test_no_cached_tokens_no_creds_raises_503(self):
+        import main as m
+        with self._with_tokens(m, {}):
+            with patch("main.get_configured_teacher_creds", return_value=[]):
+                with pytest.raises(Exception) as exc_info:
+                    m.ensure_teacher_token()
+        assert exc_info.value.__class__.__name__ == "ServiceUnavailableException"
+
+    def test_no_cached_tokens_login_fails_raises_503(self):
+        import main as m
+        with self._with_tokens(m, {}):
+            creds = [{"username": "u@example.com", "password": "pw"}]
+            with patch("main.get_configured_teacher_creds", return_value=creds), \
+                 patch("main.account_login", return_value=None):
+                with pytest.raises(Exception) as exc_info:
+                    m.ensure_teacher_token()
+        assert exc_info.value.__class__.__name__ == "ServiceUnavailableException"
+
+    def test_race_condition_tokens_emptied_before_choice(self):
+        """Regression: current_tokens emptied between check and choice must not
+        raise IndexError (i.e., random.choice on an empty sequence)."""
+        import main as m
+
+        # Simulate the race: patch current_tokens so that iterating .values()
+        # returns an empty list even though the dict appeared non-empty.
+        class _RacyDict(dict):
+            def values(self):
+                return {}.values()  # always returns empty view
+
+        original = m.current_tokens
+        # Inject a "non-empty" dict whose .values() behaves as if emptied.
+        racy = _RacyDict({"user@example.com": ("tok", 1)})
+        m.current_tokens = racy
+        try:
+            # The function must NOT raise IndexError; it falls through to the
+            # credential / ServiceUnavailableException path instead.
+            with patch("main.get_configured_teacher_creds", return_value=[]):
+                with pytest.raises(Exception) as exc_info:
+                    m.ensure_teacher_token()
+            assert exc_info.value.__class__.__name__ == "ServiceUnavailableException"
+        finally:
+            m.current_tokens = original

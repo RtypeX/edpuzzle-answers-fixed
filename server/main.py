@@ -161,8 +161,12 @@ def account_login(creds):
   return current_tokens[username][0]
 
 def ensure_teacher_token():
-  if current_tokens:
-    return random.choice(list(current_tokens.values()))
+  # Snapshot the token list before checking so a concurrent deletion by the
+  # token_refresher thread cannot cause random.choice to receive an empty
+  # sequence between the emptiness check and the actual selection.
+  tokens_list = list(current_tokens.values())
+  if tokens_list:
+    return random.choice(tokens_list)
 
   teacher_creds = get_configured_teacher_creds()
   if not teacher_creds:
